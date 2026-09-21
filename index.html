@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>拳擊回合計時器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --surface: #1E1A17;
+    --surface-2: #26211D;
+    --line: #3A332C;
+    --ink: #EDEAE4;
+    --ink-dim: #A39C92;
+    --ui-accent: #D8202B;
+    --idle-bg: #14110F;
+    --idle-fg: #EDEAE4;
+  }
+  * { box-sizing: border-box; }
+  html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: var(--live-bg, var(--idle-bg));
+    color: var(--idle-fg);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    display: flex;
+    flex-direction: column;
+    transition: background-color 0.4s ease;
+  }
+  button, .switch, .dot { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    body.flash-alert { animation: flashPulse 1s ease-in-out infinite; }
+  }
+  @keyframes flashPulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
+
+  /* fixed chrome bars */
+  .topbar, .bottombar {
+    position: fixed; left: 0; right: 0; z-index: 5;
+    background: rgba(10, 9, 8, 0.55);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    color: var(--ink);
+  }
+  .topbar {
+    top: 0;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 18px 10px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .bottombar {
+    bottom: 0;
+    padding: 12px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+  .brand {
+    font-family: 'Bebas Neue', 'Inter', sans-serif;
+    font-size: 20px;
+    letter-spacing: 0.04em;
+  }
+  .brand span { color: var(--ui-accent); }
+  .ref-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-dim); }
+  .switch {
+    position: relative; width: 38px; height: 22px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 999px; cursor: pointer; flex: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--ink-dim); transition: transform 0.15s, background 0.15s;
+  }
+  .switch.on { border-color: var(--ui-accent); background: rgba(216,32,43,0.2); }
+  .switch.on::after { transform: translateX(16px); background: var(--ui-accent); }
+
+  /* scrollable body content between the two fixed bars */
+  .scroll-area {
+    flex: 1;
+    display: flex; flex-direction: column;
+    padding-top: calc(58px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+  }
+
+  .centerStage {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px;
+    padding: 20px 20px;
+    text-align: center;
+    color: var(--live-fg, var(--idle-fg));
+    transition: color 0.4s ease;
+  }
+  .round-label { font-size: 15px; letter-spacing: 0.06em; opacity: 0.85; }
+  .kd-stat { font-size: 13px; opacity: 0.85; min-height: 16px; }
+  .phase-label { font-family: 'Bebas Neue', sans-serif; font-size: clamp(22px, 5vmin, 40px); letter-spacing: 0.08em; }
+  .time {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(80px, 26vmin, 320px);
+    line-height: 1;
+    letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .time.pulse { animation: countPulse 1s ease-in-out infinite; }
+  }
+  @keyframes countPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+
+  .bar-track { width: min(100%, 360px); height: 8px; background: rgba(0,0,0,0.25); border-radius: 999px; overflow: hidden; }
+  .bar-fill { height: 100%; width: 0%; background: currentColor; opacity: 0.9; border-radius: 999px; transition: width 0.2s linear; }
+
+  .rounds-dots { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 360px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid currentColor; opacity: 0.35; }
+  .dot.done { opacity: 0.75; background: currentColor; }
+  .dot.current { opacity: 1; background: currentColor; }
+
+  .hint { font-size: 13px; opacity: 0.8; max-width: 340px; }
+
+  /* settings (only shown while idle) */
+  .settings-block {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    margin: 0 20px 16px;
+    padding: 16px;
+  }
+  .settings-title { font-size: 14px; font-weight: 500; color: var(--ink-dim); margin-bottom: 12px; }
+  .settings-body { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 12px; color: var(--ink-dim); }
+  .field .row { display: flex; gap: 6px; }
+  .field.wide { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; }
+  .field.wide label { font-size: 13px; color: var(--ink); }
+  input[type="number"] {
+    width: 100%; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 8px; padding: 9px 8px; font-size: 15px; font-variant-numeric: tabular-nums;
+  }
+  input[type="number"]:disabled { opacity: 0.5; }
+
+  /* bottom controls */
+  .controls, .count-controls { display: flex; gap: 10px; max-width: 520px; margin: 0 auto; }
+  button {
+    font-family: 'Inter', sans-serif; font-weight: 700; font-size: 15px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 12px; padding: 14px 0; flex: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .btn-primary { background: var(--ui-accent); border-color: var(--ui-accent); color: #FFF6F3; flex: 2; }
+  .btn-primary.pause { background: var(--surface-2); border-color: var(--line); color: var(--ink); }
+  .btn-kd { background: var(--surface-2); border-color: var(--ui-accent); color: var(--ui-accent); flex: 1.3; }
+  .btn-icon { width: 18px; height: 18px; flex: none; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+</style>
+</head>
+<body>
+<h1 class="sr-only">拳擊回合計時器,含電子裁判語音、擊倒讀秒與全螢幕回合配色提示</h1>
+
+<div class="topbar">
+  <div class="brand">BOXING<span>TIMER</span></div>
+  <div class="ref-toggle">
+    <span id="refLabel">電子裁判</span>
+    <div class="switch on" id="refSwitch" role="switch" aria-checked="true" tabindex="0" aria-label="電子裁判語音開關"></div>
+  </div>
+</div>
+
+<div class="scroll-area">
+  <main class="centerStage">
+    <div class="round-label" id="roundLabel">準備開始</div>
+    <div class="kd-stat" id="kdStat"></div>
+    <div class="phase-label" id="phaseLabel">IDLE</div>
+    <div class="time" id="timeDisplay">03:00</div>
+    <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
+    <div class="rounds-dots" id="roundsDots"></div>
+    <div class="hint" id="hint">設定回合數與時間後按開始,裁判會喊 Box 開打</div>
+  </main>
+
+  <div class="settings-block" id="settingsBlock">
+    <div class="settings-title">回合設定</div>
+    <div class="settings-body">
+      <div class="field">
+        <label>總回合數</label>
+        <input type="number" id="cfgRounds" min="1" max="30" value="6">
+      </div>
+      <div class="field">
+        <label>準備倒數(秒)</label>
+        <input type="number" id="cfgPrep" min="0" max="30" value="10">
+      </div>
+      <div class="field">
+        <label>回合時間(分:秒)</label>
+        <div class="row">
+          <input type="number" id="cfgRoundMin" min="0" max="20" value="3">
+          <input type="number" id="cfgRoundSec" min="0" max="59" value="0">
+        </div>
+      </div>
+      <div class="field">
+        <label>休息時間(分:秒)</label>
+        <div class="row">
+          <input type="number" id="cfgRestMin" min="0" max="10" value="1">
+          <input type="number" id="cfgRestSec" min="0" max="59" value="0">
+        </div>
+      </div>
+      <div class="field">
+        <label>最大擊倒次數(0=不限)</label>
+        <input type="number" id="cfgMaxKd" min="0" max="10" value="3">
+      </div>
+      <div class="field wide">
+        <label>回合配色(依剩餘比例變整個背景)</label>
+        <div class="switch on" id="zoneSwitch" role="switch" aria-checked="true" tabindex="0" aria-label="回合配色開關"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="bottombar">
+  <div class="controls" id="mainControls">
+    <button class="btn-primary" id="startBtn">
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      <span id="startBtnLabel">開始</span>
+    </button>
+    <button class="btn-kd" id="kdBtn" disabled>擊倒</button>
+    <button id="skipBtn" disabled>跳過</button>
+    <button id="resetBtn">重置</button>
+  </div>
+  <div class="count-controls" id="countControls" style="display:none">
+    <button class="btn-primary" id="recoverBtn">選手起立,繼續比賽</button>
+    <button id="countResetBtn">重置</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var el = {
+    body: document.body,
+    roundLabel: document.getElementById('roundLabel'),
+    kdStat: document.getElementById('kdStat'),
+    phaseLabel: document.getElementById('phaseLabel'),
+    timeDisplay: document.getElementById('timeDisplay'),
+    barFill: document.getElementById('barFill'),
+    roundsDots: document.getElementById('roundsDots'),
+    hint: document.getElementById('hint'),
+    settingsBlock: document.getElementById('settingsBlock'),
+    mainControls: document.getElementById('mainControls'),
+    countControls: document.getElementById('countControls'),
+    startBtn: document.getElementById('startBtn'),
+    startBtnLabel: document.getElementById('startBtnLabel'),
+    kdBtn: document.getElementById('kdBtn'),
+    skipBtn: document.getElementById('skipBtn'),
+    resetBtn: document.getElementById('resetBtn'),
+    recoverBtn: document.getElementById('recoverBtn'),
+    countResetBtn: document.getElementById('countResetBtn'),
+    refSwitch: document.getElementById('refSwitch'),
+    refLabel: document.getElementById('refLabel'),
+    zoneSwitch: document.getElementById('zoneSwitch'),
+    cfgRounds: document.getElementById('cfgRounds'),
+    cfgPrep: document.getElementById('cfgPrep'),
+    cfgRoundMin: document.getElementById('cfgRoundMin'),
+    cfgRoundSec: document.getElementById('cfgRoundSec'),
+    cfgRestMin: document.getElementById('cfgRestMin'),
+    cfgRestSec: document.getElementById('cfgRestSec'),
+    cfgMaxKd: document.getElementById('cfgMaxKd')
+  };
+
+  var cfgInputs = [el.cfgRounds, el.cfgPrep, el.cfgRoundMin, el.cfgRoundSec, el.cfgRestMin, el.cfgRestSec, el.cfgMaxKd];
+
+  function clampInt(v, min, max, fallback) {
+    var n = parseInt(v, 10);
+    if (isNaN(n)) return fallback;
+    return Math.min(max, Math.max(min, n));
+  }
+  function readConfig() {
+    return {
+      totalRounds: clampInt(el.cfgRounds.value, 1, 30, 6),
+      prepSeconds: clampInt(el.cfgPrep.value, 0, 30, 10),
+      roundSeconds: clampInt(el.cfgRoundMin.value, 0, 20, 3) * 60 + clampInt(el.cfgRoundSec.value, 0, 59, 0),
+      restSeconds: clampInt(el.cfgRestMin.value, 0, 10, 1) * 60 + clampInt(el.cfgRestSec.value, 0, 59, 0),
+      maxKnockdowns: clampInt(el.cfgMaxKd.value, 0, 10, 3)
+    };
+  }
+
+  // ---------- Color system ----------
+  var PHASE_COLORS = {
+    idle:     { bg: '#14110F', fg: '#EDEAE4' },
+    prep:     { bg: '#D98A2B', fg: '#241804' },
+    rest:     { bg: '#1E63C4', fg: '#F1F6FF' },
+    count:    { bg: '#A8101F', fg: '#FFF3F1' },
+    finished: { bg: '#C9A227', fg: '#241C02' }
+  };
+  var ZONE_COLORS = {
+    green:  { bg: '#2E8B45', fg: '#F2FFF4' },
+    yellow: { bg: '#F0C23E', fg: '#241C02' },
+    red:    { bg: '#D8202B', fg: '#FFF3F1' },
+    fixed:  { bg: '#D8202B', fg: '#FFF3F1' }
+  };
+  var lastZone = null;
+  function applyColors(c) {
+    el.body.style.setProperty('--live-bg', c.bg);
+    el.body.style.setProperty('--live-fg', c.fg);
+  }
+  function updateFightColor(remaining) {
+    var z;
+    if (!zoneColorOn) { z = 'fixed'; }
+    else if (remaining > phaseDurationMs * 2 / 3) { z = 'green'; }
+    else if (remaining > phaseDurationMs / 3) { z = 'yellow'; }
+    else { z = 'red'; }
+    if (z !== lastZone) { applyColors(ZONE_COLORS[z]); lastZone = z; }
+  }
+
+  // ---------- State machine ----------
+  var STATE = { IDLE: 'idle', PREP: 'prep', FIGHT: 'fight', REST: 'rest', COUNT: 'count', FINISHED: 'finished' };
+
+  var state = STATE.IDLE;
+  var paused = false;
+  var currentRound = 1;
+  var cfg = readConfig();
+  var phaseDurationMs = 0;
+  var endTime = 0;
+  var remainingAtPause = 0;
+  var tickHandle = null;
+  var countHandle = null;
+  var announced10s = false;
+  var lastBeepSecond = null;
+  var wakeLock = null;
+  var zoneColorOn = true;
+  var refereeOn = true;
+  var knockdownCount = 0;
+  var countNumber = 0;
+  var fightRemainingMs = 0;
+  var matchEndReason = 'completed';
+  var resetArmed = false;
+  var resetArmTimeout = null;
+  var skipLocked = false;
+
+  function transitionTo(next) {
+    state = next;
+    paused = false;
+    if (next === STATE.PREP) {
+      phaseDurationMs = cfg.prepSeconds * 1000;
+      applyColors(PHASE_COLORS.prep);
+      startPhaseTimer();
+      speakRef('seconds out');
+    } else if (next === STATE.FIGHT) {
+      phaseDurationMs = cfg.roundSeconds * 1000;
+      lastZone = null;
+      startPhaseTimer();
+      updateFightColor(phaseDurationMs);
+      playBell(1);
+      speakRef('box');
+    } else if (next === STATE.REST) {
+      phaseDurationMs = cfg.restSeconds * 1000;
+      applyColors(PHASE_COLORS.rest);
+      startPhaseTimer();
+      playBell(3);
+      speakRef('stop');
+    }
+    render();
+  }
+
+  function startPhaseTimer() {
+    announced10s = false;
+    lastBeepSecond = null;
+    endTime = Date.now() + phaseDurationMs;
+    stopTicking();
+    tickHandle = setInterval(tick, 100);
+    tick();
+  }
+
+  function stopTicking() {
+    if (tickHandle) { clearInterval(tickHandle); tickHandle = null; }
+  }
+
+  function tick() {
+    var remaining = endTime - Date.now();
+    if (remaining <= 0) {
+      el.body.classList.remove('flash-alert');
+      renderTime(0);
+      onPhaseEnd();
+      return;
+    }
+    var secLeft = Math.ceil(remaining / 1000);
+    var isCritical = (state === STATE.FIGHT || state === STATE.REST) && secLeft <= 10;
+    if (isCritical) {
+      if (!announced10s) { announced10s = true; speakRef('ten seconds'); }
+      if (secLeft !== lastBeepSecond) { lastBeepSecond = secLeft; playTick(); }
+    }
+    el.body.classList.toggle('flash-alert', isCritical);
+    if (state === STATE.FIGHT) updateFightColor(remaining);
+    renderTime(remaining);
+  }
+
+  function onPhaseEnd() {
+    if (state === STATE.PREP) {
+      transitionTo(STATE.FIGHT);
+    } else if (state === STATE.FIGHT) {
+      transitionTo(STATE.REST);
+    } else if (state === STATE.REST) {
+      currentRound++;
+      if (currentRound > cfg.totalRounds) {
+        finishMatch('completed');
+      } else {
+        transitionTo(STATE.FIGHT);
+      }
+    }
+  }
+
+  function finishMatch(reason) {
+    matchEndReason = reason;
+    state = STATE.FINISHED;
+    stopTicking();
+    if (countHandle) { clearInterval(countHandle); countHandle = null; }
+    el.body.classList.remove('flash-alert');
+    applyColors(PHASE_COLORS.finished);
+    playBell(3);
+    if (reason === 'knockout') speakRef('knockout');
+    else if (reason === 'stopped') speakRef('stopped');
+    else speakRef("that's all, good work");
+    releaseWakeLock();
+    render();
+  }
+
+  // ---------- Knockdown / count ----------
+  function triggerKnockdown() {
+    if (state !== STATE.FIGHT || paused) return;
+    fightRemainingMs = Math.max(0, endTime - Date.now());
+    stopTicking();
+    el.body.classList.remove('flash-alert');
+    applyColors(PHASE_COLORS.count);
+    knockdownCount++;
+    countNumber = 0;
+    state = STATE.COUNT;
+    speakRef('knockdown');
+    render();
+    countHandle = setInterval(countTick, 1000);
+  }
+
+  function countTick() {
+    countNumber++;
+    speakCount(countNumber);
+    render();
+    if (countNumber >= 10) {
+      clearInterval(countHandle);
+      countHandle = null;
+      finishMatch('knockout');
+    }
+  }
+
+  function recoverFromCount() {
+    if (state !== STATE.COUNT) return;
+    if (countHandle) { clearInterval(countHandle); countHandle = null; }
+    if (cfg.maxKnockdowns > 0 && knockdownCount >= cfg.maxKnockdowns) {
+      finishMatch('stopped');
+      return;
+    }
+    state = STATE.FIGHT;
+    lastZone = null;
+    endTime = Date.now() + fightRemainingMs;
+    updateFightColor(fightRemainingMs);
+    tickHandle = setInterval(tick, 100);
+    tick();
+    render();
+  }
+
+  // ---------- Controls ----------
+  function handleStart() {
+    if (state === STATE.IDLE || state === STATE.FINISHED) {
+      cfg = readConfig();
+      currentRound = 1;
+      knockdownCount = 0;
+      setInputsDisabled(true);
+      el.settingsBlock.style.display = 'none';
+      requestWakeLock();
+      buildDots();
+      transitionTo(STATE.PREP);
+    } else if (state === STATE.COUNT) {
+      return;
+    } else if (!paused) {
+      paused = true;
+      remainingAtPause = endTime - Date.now();
+      stopTicking();
+      el.body.classList.remove('flash-alert');
+      render();
+    } else {
+      paused = false;
+      endTime = Date.now() + Math.max(0, remainingAtPause);
+      tickHandle = setInterval(tick, 100);
+      tick();
+      render();
+    }
+  }
+
+  function handleSkip() {
+    if (skipLocked) return;
+    if (state === STATE.PREP || state === STATE.FIGHT || state === STATE.REST) {
+      skipLocked = true;
+      stopTicking();
+      onPhaseEnd();
+      setTimeout(function () { skipLocked = false; }, 400);
+    }
+  }
+
+  function requestReset() {
+    if (state === STATE.IDLE || state === STATE.FINISHED) { performReset(); return; }
+    if (resetArmed) {
+      clearTimeout(resetArmTimeout);
+      resetArmed = false;
+      performReset();
+      return;
+    }
+    resetArmed = true;
+    setResetLabel('再按一次確認重置');
+    resetArmTimeout = setTimeout(function () { resetArmed = false; setResetLabel('重置'); }, 1600);
+  }
+  function setResetLabel(text) {
+    el.resetBtn.textContent = text;
+    el.countResetBtn.textContent = text;
+  }
+  function performReset() {
+    setResetLabel('重置');
+    stopTicking();
+    if (countHandle) { clearInterval(countHandle); countHandle = null; }
+    state = STATE.IDLE;
+    paused = false;
+    currentRound = 1;
+    knockdownCount = 0;
+    lastZone = null;
+    el.body.classList.remove('flash-alert');
+    applyColors(PHASE_COLORS.idle);
+    setInputsDisabled(false);
+    el.settingsBlock.style.display = '';
+    releaseWakeLock();
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    render();
+  }
+
+  function setInputsDisabled(disabled) {
+    cfgInputs.forEach(function (i) { i.disabled = disabled; });
+  }
+
+  // ---------- Rendering ----------
+  function fmtTime(ms) {
+    var totalSec = Math.ceil(ms / 1000);
+    var m = Math.floor(totalSec / 60);
+    var s = totalSec % 60;
+    return (m < 10 ? '0' + m : m) + ':' + (s < 10 ? '0' + s : s);
+  }
+
+  function renderTime(remainingMs) {
+    el.timeDisplay.textContent = fmtTime(remainingMs);
+    var frac = phaseDurationMs > 0 ? (1 - remainingMs / phaseDurationMs) : 0;
+    el.barFill.style.width = (Math.min(1, Math.max(0, frac)) * 100) + '%';
+  }
+
+  var stateLabels = { idle: 'IDLE', prep: 'PREP', fight: 'FIGHT', rest: 'REST', count: 'KNOCKDOWN', finished: 'DONE' };
+
+  function currentHint() {
+    switch (state) {
+      case STATE.IDLE: return '設定回合數與時間後按開始,裁判會喊 Box 開打';
+      case STATE.PREP: return '準備動作,裁判即將喊開始';
+      case STATE.FIGHT: return '對打中,保持節奏';
+      case STATE.REST: return '休息,補充呼吸';
+      case STATE.COUNT: return '選手倒地,裁判正在讀秒,起立後按下方按鈕繼續';
+      case STATE.FINISHED:
+        if (matchEndReason === 'knockout') return '擊倒讀秒滿10秒,比賽結束(KO)';
+        if (matchEndReason === 'stopped') return '達到最大擊倒次數,裁判終止比賽(TKO)';
+        return '訓練完成,做得好';
+    }
+    return '';
+  }
+
+  function render() {
+    el.phaseLabel.textContent = stateLabels[state];
+    el.hint.textContent = currentHint();
+    el.timeDisplay.classList.toggle('pulse', state === STATE.COUNT);
+
+    if (state === STATE.IDLE) {
+      el.roundLabel.textContent = '準備開始 · 共 ' + cfg.totalRounds + ' 回合';
+      el.timeDisplay.textContent = fmtTime(readConfig().roundSeconds * 1000);
+      el.barFill.style.width = '0%';
+    } else if (state === STATE.COUNT) {
+      el.roundLabel.textContent = 'ROUND ' + currentRound + ' · 擊倒讀秒';
+      el.timeDisplay.textContent = String(countNumber);
+      el.barFill.style.width = (countNumber / 10 * 100) + '%';
+    } else if (state === STATE.FINISHED) {
+      el.roundLabel.textContent = '已完成 ' + Math.min(currentRound, cfg.totalRounds) + ' / ' + cfg.totalRounds + ' 回合';
+    } else {
+      el.roundLabel.textContent = 'ROUND ' + currentRound + ' / ' + cfg.totalRounds;
+    }
+
+    el.kdStat.textContent = knockdownCount > 0
+      ? '擊倒次數:' + knockdownCount + (cfg.maxKnockdowns > 0 ? ' / ' + cfg.maxKnockdowns : '')
+      : '';
+
+    if (state === STATE.IDLE || state === STATE.FINISHED) {
+      el.startBtnLabel.textContent = state === STATE.FINISHED ? '重新開始' : '開始';
+      el.startBtn.classList.remove('pause');
+      el.startBtn.querySelector('svg').innerHTML = '<path d="M8 5v14l11-7z"/>';
+    } else if (paused) {
+      el.startBtnLabel.textContent = '繼續';
+      el.startBtn.classList.remove('pause');
+      el.startBtn.querySelector('svg').innerHTML = '<path d="M8 5v14l11-7z"/>';
+    } else {
+      el.startBtnLabel.textContent = '暫停';
+      el.startBtn.classList.add('pause');
+      el.startBtn.querySelector('svg').innerHTML = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
+    }
+
+    el.startBtn.disabled = (state === STATE.COUNT);
+    el.kdBtn.disabled = !(state === STATE.FIGHT && !paused);
+    el.skipBtn.disabled = (state === STATE.IDLE || state === STATE.FINISHED || state === STATE.COUNT);
+
+    var showCountPanel = (state === STATE.COUNT);
+    el.mainControls.style.display = showCountPanel ? 'none' : 'flex';
+    el.countControls.style.display = showCountPanel ? 'flex' : 'none';
+
+    updateDots();
+  }
+
+  function buildDots() {
+    el.roundsDots.innerHTML = '';
+    for (var i = 1; i <= cfg.totalRounds; i++) {
+      var d = document.createElement('div');
+      d.className = 'dot';
+      el.roundsDots.appendChild(d);
+    }
+  }
+
+  function updateDots() {
+    var dots = el.roundsDots.children;
+    for (var i = 0; i < dots.length; i++) {
+      var r = i + 1;
+      var cls = 'dot';
+      if (r < currentRound || state === STATE.FINISHED) cls += ' done';
+      else if (r === currentRound && state !== STATE.IDLE) cls += ' current';
+      dots[i].className = cls;
+    }
+  }
+
+  // ---------- Audio ----------
+  var audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctx();
+    }
+    return audioCtx;
+  }
+  function playBell(times) {
+    try {
+      var ctx = getAudioCtx();
+      for (var i = 0; i < times; i++) {
+        (function (delay) {
+          var osc = ctx.createOscillator();
+          var gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.value = 880;
+          gain.gain.setValueAtTime(0.0001, ctx.currentTime + delay);
+          gain.gain.exponentialRampToValueAtTime(0.5, ctx.currentTime + delay + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + 0.9);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(ctx.currentTime + delay);
+          osc.stop(ctx.currentTime + delay + 0.95);
+        })(i * 0.5);
+      }
+    } catch (e) { /* audio unavailable */ }
+  }
+  function playTick() {
+    try {
+      var ctx = getAudioCtx();
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 440;
+      gain.gain.setValueAtTime(0.22, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.13);
+    } catch (e) { /* audio unavailable */ }
+  }
+
+  // ---------- Referee voice ----------
+  var refereePhrases = {
+    'seconds out': 'Seconds out.',
+    'box': 'Box!',
+    'stop': 'Stop!',
+    'ten seconds': 'Ten seconds.',
+    'knockdown': 'Down! Knockdown!',
+    'knockout': "Ten! That's a knockout!",
+    'stopped': "That's enough! Fight stopped!",
+    "that's all, good work": "That's all. Good work."
+  };
+  var countWords = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+
+  function speakText(text) {
+    if (!refereeOn || !('speechSynthesis' in window)) return;
+    try {
+      var utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'en-US';
+      utter.rate = 0.95;
+      utter.pitch = 0.85;
+      speechSynthesis.speak(utter);
+    } catch (e) { /* speech unavailable */ }
+  }
+  function speakRef(key) {
+    if (!refereeOn) return;
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    speakText(refereePhrases[key] || key);
+  }
+  function speakCount(n) {
+    playTick();
+    speakText(countWords[n] + '!');
+  }
+
+  function setReferee(on) {
+    refereeOn = on;
+    el.refSwitch.classList.toggle('on', on);
+    el.refSwitch.setAttribute('aria-checked', on ? 'true' : 'false');
+    el.refLabel.textContent = on ? '電子裁判' : '電子裁判(靜音)';
+    saveSettings();
+  }
+  if (!('speechSynthesis' in window)) {
+    el.refLabel.textContent = '此瀏覽器不支援語音';
+    el.refSwitch.style.pointerEvents = 'none';
+    el.refSwitch.classList.remove('on');
+    refereeOn = false;
+  }
+
+  function setZoneColor(on) {
+    zoneColorOn = on;
+    el.zoneSwitch.classList.toggle('on', on);
+    el.zoneSwitch.setAttribute('aria-checked', on ? 'true' : 'false');
+    saveSettings();
+  }
+
+  // ---------- Wake lock ----------
+  function requestWakeLock() {
+    if ('wakeLock' in navigator) {
+      navigator.wakeLock.request('screen').then(function (lock) { wakeLock = lock; }).catch(function () {});
+    }
+  }
+  function releaseWakeLock() {
+    if (wakeLock) { wakeLock.release().catch(function () {}); wakeLock = null; }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && wakeLock === null &&
+        (state === STATE.PREP || state === STATE.FIGHT || state === STATE.REST || state === STATE.COUNT) && !paused) {
+      requestWakeLock();
+    }
+  });
+
+  // ---------- Persisted settings (config only, not run state) ----------
+  var STORAGE_KEY = 'boxingTimerSettings_v2';
+  function saveSettings() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        rounds: el.cfgRounds.value, prep: el.cfgPrep.value,
+        roundMin: el.cfgRoundMin.value, roundSec: el.cfgRoundSec.value,
+        restMin: el.cfgRestMin.value, restSec: el.cfgRestSec.value,
+        maxKd: el.cfgMaxKd.value, referee: refereeOn, zone: zoneColorOn
+      }));
+    } catch (e) { /* storage unavailable */ }
+  }
+  function loadSettings() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var d = JSON.parse(raw);
+      if (d.rounds != null) el.cfgRounds.value = d.rounds;
+      if (d.prep != null) el.cfgPrep.value = d.prep;
+      if (d.roundMin != null) el.cfgRoundMin.value = d.roundMin;
+      if (d.roundSec != null) el.cfgRoundSec.value = d.roundSec;
+      if (d.restMin != null) el.cfgRestMin.value = d.restMin;
+      if (d.restSec != null) el.cfgRestSec.value = d.restSec;
+      if (d.maxKd != null) el.cfgMaxKd.value = d.maxKd;
+      if ('speechSynthesis' in window) setReferee(d.referee !== false);
+      setZoneColor(d.zone !== false);
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  // ---------- Wire up events ----------
+  el.startBtn.addEventListener('click', handleStart);
+  el.kdBtn.addEventListener('click', triggerKnockdown);
+  el.skipBtn.addEventListener('click', handleSkip);
+  el.resetBtn.addEventListener('click', requestReset);
+  el.recoverBtn.addEventListener('click', recoverFromCount);
+  el.countResetBtn.addEventListener('click', requestReset);
+
+  el.refSwitch.addEventListener('click', function () { setReferee(!refereeOn); });
+  el.refSwitch.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReferee(!refereeOn); }
+  });
+  el.zoneSwitch.addEventListener('click', function () { setZoneColor(!zoneColorOn); });
+  el.zoneSwitch.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setZoneColor(!zoneColorOn); }
+  });
+  cfgInputs.forEach(function (input) {
+    input.addEventListener('change', function () {
+      saveSettings();
+      if (state === STATE.IDLE) { cfg = readConfig(); render(); }
+    });
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.repeat) return;
+    var tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.code === 'Space') { e.preventDefault(); if (state !== STATE.COUNT) handleStart(); }
+    else if (e.key === 'k' || e.key === 'K') { if (state === STATE.FIGHT && !paused) triggerKnockdown(); }
+    else if (e.key === 's' || e.key === 'S') { handleSkip(); }
+    else if (e.key === 'r' || e.key === 'R') { if (state === STATE.COUNT) recoverFromCount(); else requestReset(); }
+  });
+
+  // ---------- Init ----------
+  applyColors(PHASE_COLORS.idle);
+  loadSettings();
+  cfg = readConfig();
+  buildDots();
+  render();
+})();
+</script>
+</body>
+</html>
